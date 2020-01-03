@@ -388,6 +388,12 @@ manually. For other SSL backends please ignore this message.''')
     def configure_windows(self):
         # Windows users have to pass --curl-dir parameter to specify path
         # to libcurl, because there is no curl-config on windows at all.
+
+        import winbuild
+        winbuild.get_deps()
+
+        win_build_env = __import__('win_build_env')
+
         curl_dir = scan_argv(self.argv, "--curl-dir=")
         if curl_dir is None:
             fail("Please specify --curl-dir=/path/to/built/libcurl")
@@ -445,13 +451,15 @@ manually. For other SSL backends please ignore this message.''')
             self.extra_compile_args.append("-O2")
             self.extra_compile_args.append("-GF")        # enable read-only string pooling
             self.extra_compile_args.append("-WX")        # treat warnings as errors
-            p = subprocess.Popen(['cl.exe'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            out, err = p.communicate()
-            match = re.search(r'Version (\d+)', err.decode().split("\n")[0])
-            if match and int(match.group(1)) < 16:
-                # option removed in vs 2010:
-                # connect.microsoft.com/VisualStudio/feedback/details/475896/link-fatal-error-lnk1117-syntax-error-in-option-opt-nowin98/
-                self.extra_link_args.append("/opt:nowin98")  # use small section alignment
+            # p = subprocess.Popen(['cl.exe'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            # out, err = p.communicate()
+            # match = re.search(r'Version (\d+)', err.decode().split("\n")[0])
+
+            #
+            # if match and int(match.group(1)) < 16:
+            #     # option removed in vs 2010:
+            #     # connect.microsoft.com/VisualStudio/feedback/details/475896/link-fatal-error-lnk1117-syntax-error-in-option-opt-nowin98/
+            #     self.extra_link_args.append("/opt:nowin98")  # use small section alignment
 
     if sys.platform == "win32":
         configure = configure_windows

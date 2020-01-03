@@ -282,22 +282,29 @@ def rm_rf(path):
 def cp_r(src, dest):
     check_call([config.cp_path, '-r', src, dest])
 
-def fetch(url, archive=None):
+def fetch(url, archive=None, stream=None):
     if archive is None:
         archive = os.path.basename(url)
     if not os.path.exists(archive):
         sys.stdout.write("Fetching %s\n" % url)
         sys.stdout.flush()
         io = urlopen(url)
-        tmp_path = os.path.join(os.path.dirname(archive),
-            '.%s.part' % os.path.basename(archive))
-        with open(tmp_path, 'wb') as f:
-            while True:
-                chunk = io.read(65536)
-                if len(chunk) == 0:
-                    break
-                f.write(chunk)
-        os.rename(tmp_path, archive)
+        if stream is None:
+            tmp_path = os.path.join(os.path.dirname(archive),
+                '.%s.part' % os.path.basename(archive))
+            f = open(tmp_path, 'wb')
+        else:
+            f = stream
+        while True:
+            chunk = io.read(65536)
+            if len(chunk) == 0:
+                break
+            f.write(chunk)
+
+        if stream is None:
+            f.close()
+            os.rename(tmp_path, archive)
+
 
 def fetch_to_archives(url):
     mkdir_p(config.archives_path)
@@ -1157,68 +1164,106 @@ def get_deps():
     vc_version = PYTHON_VC_VERSIONS['.'.join(map(str, python_release))]
     bitness = struct.calcsize('P') * 8
     vc_tag = '%s-%d' % (vc_version, bitness)
-    fetch('https://dl.bintray.com/pycurl/deps/%s.zip' % vc_tag)
-    check_call(['unzip', '-d', 'deps', vc_tag + '.zip'])
-    
 
-import optparse
+    if os.path.exists(os.path.abspath('deps')):
+        import shutil
 
-parser = optparse.OptionParser()
-parser.add_option('-b', '--bitness', help='Bitnesses build for, comma separated')
-parser.add_option('-p', '--python', help='Python versions to build for, comma separated')
-parser.add_option('-v', '--verbose', help='Print what is being done', action='store_true')
-opts, args = parser.parse_args()
+        shutil.rmtree(os.path.abspath('deps'))
 
-if opts.bitness:
-    chosen_bitnesses = [int(bitness) for bitness in opts.bitness.split(',')]
-    for bitness in chosen_bitnesses:
-        if bitness not in BITNESSES:
-            print('Invalid bitness %d' % bitness)
-            exit(2)
-else:
-    chosen_bitnesses = BITNESSES
+    # this is a wee bit of a trick I learned.. There is no need to go through the
+    # coded up a temp file handler to save a zip file so it can get uncompressed
+    # we are able to take the data plop it into a file like object and pass that
+    # object right to zipfile.ZipFile. be sure to seek the file back to the
+    # starting point.. and to do cleanup by closing both the zipfile.ZipFile and
+    # the stream instance.
 
-if opts.python:
-    chosen_pythons = opts.python.split(',')
-    chosen_python_versions = []
-    for python in chosen_pythons:
-        python = python.replace('.', '')
-        python = python[0] + '.' + python[1] + '.'
-        ok = False
-        for python_version in Config.python_versions:
-            if python_version.startswith(python):
-                chosen_python_versions.append(python_version)
-                ok = True
-        if not ok:
-            print('Invalid python %s' % python)
-            exit(2)
-else:
-    chosen_python_versions = Config.python_versions
+    # I modified the fetch method to accept an additional parameter which is the
+    # file like object.
+    if sys.version_info[0] == 2:
+        from StringIO import StringIO
+        stream = StringIO()
 
-config = ExtendedConfig(
-    bitnesses=chosen_bitnesses,
-    python_versions=chosen_python_versions,
-)
-
-if len(args) > 0:
-    if args[0] == 'download':
-        download_pythons(config)
-    elif args[0] == 'bootstrap':
-        download_bootstrap_python(config)
-    elif args[0] == 'installpy':
-        install_pythons(config)
-    elif args[0] == 'builddeps':
-        build_dependencies(config)
-    elif args[0] == 'installvirtualenv':
-        install_virtualenv(config)
-    elif args[0] == 'createvirtualenvs':
-        create_virtualenvs(config)
-    elif args[0] == 'assembledeps':
-        assemble_deps(config)
-    elif args[0] == 'getdeps':
-        get_deps()
     else:
-        print('Unknown command: %s' % args[0])
-        exit(2)
-else:
-    build(config)
+        from io import BytesIO
+        stream = BytesIO()
+
+    fetch('https://dl.bintray.com/pycurl/deps/%s.zip' % vc_tag, stream=stream)
+    stream.seek(0)
+
+    # This is not going to work. unless someone has specifically installed an unzip
+    # utility and placed it into the path environment variable a TB is going to happen..
+    # Python has a nice std lib called zipfile that will handle this task with ease.
+    # check_call(['unzip', '-d', 'deps', vc_tag + '.zip'])
+    import zipfile
+
+    z_file = zipfile.ZipFile(stream)
+    z_file.extractall('deps')
+    z_file.close()
+    stream.close()
+
+
+
+if __name__ == '__main__':
+
+    import optparse
+
+    parser = optparse.OptionParser()
+    parser.add_option('-b', '--bitness', help='Bitnesses build for, comma separated')
+    parser.add_option('-p', '--python', help='Python versions to build for, comma separated')
+    parser.add_option('-v', '--verbose', help='Print what is being done', action='store_true')
+    opts, args = parser.parse_args()
+
+    if opts.bitness:
+        chosen_bitnesses = [int(bitness) for bitness in opts.bitness.split(',')]
+        for bitness in chosen_bitnesses:
+            if bitness not in BITNESSES:
+                print('Invalid bitness %d' % bitness)
+                exit(2)
+    else:
+        chosen_bitnesses = BITNESSES
+
+    if opts.python:
+        chosen_pythons = opts.python.split(',')
+        chosen_python_versions = []
+        for python in chosen_pythons:
+            python = python.replace('.', '')
+            python = python[0] + '.' + python[1] + '.'
+            ok = False
+            for python_version in Config.python_versions:
+                if python_version.startswith(python):
+                    chosen_python_versions.append(python_version)
+                    ok = True
+            if not ok:
+                print('Invalid python %s' % python)
+                exit(2)
+    else:
+        chosen_python_versions = Config.python_versions
+
+    config = ExtendedConfig(
+        bitnesses=chosen_bitnesses,
+        python_versions=chosen_python_versions,
+    )
+
+
+    if len(args) > 0:
+        if args[0] == 'download':
+            download_pythons(config)
+        elif args[0] == 'bootstrap':
+            download_bootstrap_python(config)
+        elif args[0] == 'installpy':
+            install_pythons(config)
+        elif args[0] == 'builddeps':
+            build_dependencies(config)
+        elif args[0] == 'installvirtualenv':
+            install_virtualenv(config)
+        elif args[0] == 'createvirtualenvs':
+            create_virtualenvs(config)
+        elif args[0] == 'assembledeps':
+            assemble_deps(config)
+        elif args[0] == 'getdeps':
+            get_deps()
+        else:
+            print('Unknown command: %s' % args[0])
+            exit(2)
+    else:
+        build(config)

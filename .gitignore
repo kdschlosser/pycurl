@@ -3,6 +3,7 @@
 /MANIFEST
 /build
 /dist
+/deps
 /src/allpycurl.c
 /src/docstrings.c
 /src/docstrings.h
@@ -12,3 +13,4 @@
 /www/htdocs/download/*.exe
 /www/htdocs/download/*.gz
 /www/upload/*
+.idea
